@@ -39,115 +39,168 @@ class CustomizationView(discord.ui.View):
 
     @discord.ui.button(label="Change Avatar", style=discord.ButtonStyle.blurple, emoji="🖼️")
     async def change_avatar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            f"{emote.info} Please send the image URL or upload an image for the new bot avatar.\n"
-            f"{emote.yellow} Type `cancel` to cancel this operation.",
-            ephemeral=True
-        )
+     await interaction.response.send_message(
+        f"{emote.info} Please send the image URL or upload an image for the server avatar.\n"
+        f"{emote.yellow} Type `cancel` to cancel this operation.\n"
+        f"{emote.yellow} **Note:** This attempts server-specific avatar. May require special bot permissions.",
+        ephemeral=True
+     )
+    
+     def check(m):
+        return m.author.id == self.ctx.author.id and m.channel.id == self.ctx.channel.id
+    
+     try:
+        msg = await self.bot.wait_for('message', timeout=60.0, check=check)
         
-        def check(m):
-            return m.author.id == self.ctx.author.id and m.channel.id == self.ctx.channel.id
+        if msg.content.lower() == 'cancel':
+            return await self.ctx.send(f"{emote.xmark} Operation cancelled!")
         
-        try:
-            msg = await self.bot.wait_for('message', timeout=60.0, check=check)
+        image_url = None
+        if msg.attachments:
+            image_url = msg.attachments[0].url
+        elif msg.content.startswith(('http://', 'https://')):
+            image_url = msg.content
+        else:
+            return await self.ctx.error("Invalid image URL or attachment!")
+        
+        async with self.bot.session.get(image_url) as resp:
+            if resp.status != 200:
+                return await self.ctx.error("Could not download the image!")
             
-            if msg.content.lower() == 'cancel':
-                return await self.ctx.send(f"{emote.xmark} Operation cancelled!")
+            image_data = await resp.read()
             
-            image_url = None
-            if msg.attachments:
-                image_url = msg.attachments[0].url
-            elif msg.content.startswith(('http://', 'https://')):
-                image_url = msg.content
-            else:
-                return await self.ctx.error("Invalid image URL or attachment!")
-            
-            async with self.bot.session.get(image_url) as resp:
-                if resp.status != 200:
-                    return await self.ctx.error("Could not download the image!")
+            # Try server-specific avatar using Discord HTTP API
+            try:
+                guild_id = self.ctx.guild.id
+                # Convert image to base64
+                import base64
+                avatar_b64 = f"data:image/png;base64,{base64.b64encode(image_data).decode('utf-8')}"
                 
-                image_data = await resp.read()
+                # Attempt to set guild member profile avatar via HTTP endpoint
+                route = discord.http.Route(
+                    'PATCH',
+                    f'/guilds/{guild_id}/members/@me',
+                )
+                payload = {'avatar': avatar_b64}
+                
+                await self.bot.http.request(route, json=payload)
+                await self.ctx.success(f"{emote.check} Server avatar changed successfully!")
+                
+            except discord.HTTPException as e:
+                # Fallback: Change global avatar if server-specific fails
                 await self.bot.user.edit(avatar=image_data)
-                await self.ctx.success(f"{emote.check} Bot avatar changed successfully!")
+                await self.ctx.send(
+                    f"{emote.yellow} Server-specific avatar not supported by Discord for bots.\n"
+                    f"{emote.check} Changed global bot avatar instead!"
+                )
                 
-        except asyncio.TimeoutError:
-            await self.ctx.error("You took too long to respond!")
-        except discord.HTTPException as e:
-            await self.ctx.error(f"Failed to change avatar: {e}")
+     except asyncio.TimeoutError:
+        await self.ctx.error("You took too long to respond!")
+     except Exception as e:
+        await self.ctx.error(f"Failed to change avatar: {e}")
 
-    @discord.ui.button(label="Change Name", style=discord.ButtonStyle.blurple, emoji="✏️")
-    async def change_name(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            f"{emote.info} Please send the new bot name.\n"
-            f"{emote.yellow} Type `cancel` to cancel this operation.",
-            ephemeral=True
+    @discord.ui.button(label="Change Bio", style=discord.ButtonStyle.blurple, emoji="📝")
+    async def change_bio(self, interaction: discord.Interaction, button: discord.ui.Button):
+     await interaction.response.send_message(
+        f"{emote.info} Please send the new server bio/about me.\n"
+        f"{emote.yellow} Type `cancel` to cancel this operation.\n"
+        f"{emote.yellow} **Note:** Bio will be set globally (Discord limitation for bots).",
+        ephemeral=True
+    )
+    
+     def check(m):
+        return m.author.id == self.ctx.author.id and m.channel.id == self.ctx.channel.id
+    
+     try:
+        msg = await self.bot.wait_for('message', timeout=60.0, check=check)
+        
+        if msg.content.lower() == 'cancel':
+            return await self.ctx.send(f"{emote.xmark} Operation cancelled!")
+        
+        new_bio = msg.content.strip()
+        
+        if len(new_bio) > 190:
+            return await self.ctx.error("Bio must be 190 characters or less!")
+        
+        # Change bot bio globally (server-specific not supported for bots)
+        await self.bot.user.edit(bio=new_bio)
+        await self.ctx.success(
+            f"{emote.check} Bot bio changed successfully!\n"
+            f"**New Bio:** {new_bio}\n"
+            f"{emote.yellow} Note: Bio is global for all servers (Discord limitation)"
         )
         
-        def check(m):
-            return m.author.id == self.ctx.author.id and m.channel.id == self.ctx.channel.id
-        
-        try:
-            msg = await self.bot.wait_for('message', timeout=60.0, check=check)
-            
-            if msg.content.lower() == 'cancel':
-                return await self.ctx.send(f"{emote.xmark} Operation cancelled!")
-            
-            new_name = msg.content.strip()
-            
-            if len(new_name) < 2 or len(new_name) > 32:
-                return await self.ctx.error("Bot name must be between 2-32 characters!")
-            
-            await self.bot.user.edit(username=new_name)
-            await self.ctx.success(f"{emote.check} Bot name changed to **{new_name}** successfully!")
-            
-        except asyncio.TimeoutError:
-            await self.ctx.error("You took too long to respond!")
-        except discord.HTTPException as e:
-            await self.ctx.error(f"Failed to change name: {e}")
+     except asyncio.TimeoutError:
+        await self.ctx.error("You took too long to respond!")
+     except discord.HTTPException as e:
+        await self.ctx.error(f"Failed to change bio: {e}")
 
     @discord.ui.button(label="Change Banner", style=discord.ButtonStyle.blurple, emoji="🎨")
     async def change_banner(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            f"{emote.info} Please send the image URL or upload an image for the new bot banner.\n"
-            f"{emote.yellow} Type `cancel` to cancel this operation.\n"
-            f"{emote.yellow} **Note:** Banner requires bot to be on a server with banner feature.",
-            ephemeral=True
-        )
+     await interaction.response.send_message(
+        f"{emote.info} Please send the image URL or upload an image for the server banner.\n"
+        f"{emote.yellow} Type `cancel` to cancel this operation.\n"
+        f"{emote.yellow} **Note:** This attempts server-specific banner. May require special permissions.",
+        ephemeral=True
+     )
+    
+     def check(m):
+        return m.author.id == self.ctx.author.id and m.channel.id == self.ctx.channel.id
+    
+     try:
+        msg = await self.bot.wait_for('message', timeout=60.0, check=check)
         
-        def check(m):
-            return m.author.id == self.ctx.author.id and m.channel.id == self.ctx.channel.id
+        if msg.content.lower() == 'cancel':
+            return await self.ctx.send(f"{emote.xmark} Operation cancelled!")
         
-        try:
-            msg = await self.bot.wait_for('message', timeout=60.0, check=check)
+        image_url = None
+        if msg.attachments:
+            image_url = msg.attachments[0].url
+        elif msg.content.startswith(('http://', 'https://')):
+            image_url = msg.content
+        else:
+            return await self.ctx.error("Invalid image URL or attachment!")
+        
+        async with self.bot.session.get(image_url) as resp:
+            if resp.status != 200:
+                return await self.ctx.error("Could not download the image!")
             
-            if msg.content.lower() == 'cancel':
-                return await self.ctx.send(f"{emote.xmark} Operation cancelled!")
+            image_data = await resp.read()
             
-            image_url = None
-            if msg.attachments:
-                image_url = msg.attachments[0].url
-            elif msg.content.startswith(('http://', 'https://')):
-                image_url = msg.content
-            else:
-                return await self.ctx.error("Invalid image URL or attachment!")
-            
-            async with self.bot.session.get(image_url) as resp:
-                if resp.status != 200:
-                    return await self.ctx.error("Could not download the image!")
+            # Try server-specific banner using Discord HTTP API
+            try:
+                guild_id = self.ctx.guild.id
+                # Convert image to base64
+                import base64
+                banner_b64 = f"data:image/png;base64,{base64.b64encode(image_data).decode('utf-8')}"
                 
-                image_data = await resp.read()
+                # Attempt to set guild member profile banner via HTTP endpoint
+                route = discord.http.Route(
+                    'PATCH',
+                    f'/guilds/{guild_id}/members/@me',
+                )
+                payload = {'banner': banner_b64}
+                
+                await self.bot.http.request(route, json=payload)
+                await self.ctx.success(f"{emote.check} Server banner changed successfully!")
+                
+            except discord.HTTPException as e:
+                # Fallback: Change global banner if server-specific fails
                 await self.bot.user.edit(banner=image_data)
-                await self.ctx.success(f"{emote.check} Bot banner changed successfully!")
+                await self.ctx.send(
+                    f"{emote.yellow} Server-specific banner not supported by Discord for bots.\n"
+                    f"{emote.check} Changed global bot banner instead!"
+                )
                 
-        except asyncio.TimeoutError:
-            await self.ctx.error("You took too long to respond!")
-        except discord.HTTPException as e:
-            await self.ctx.error(f"Failed to change banner: {e}")
+     except asyncio.TimeoutError:
+        await self.ctx.error("You took too long to respond!")
+     except Exception as e:
+        await self.ctx.error(f"Failed to change banner: {e}")
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.red, emoji="❌")
     async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(f"{emote.check} Customization cancelled!", ephemeral=True)
-        self.stop()
+     await interaction.response.send_message(f"{emote.check} Customization cancelled!", ephemeral=True)
+     self.stop()
 
 
 class PremiumCog(Cog, name="Premium"):
@@ -236,12 +289,23 @@ class PremiumCog(Cog, name="Premium"):
 
     @commands.command(name="removepremium", aliases=["rp"])
     @commands.is_owner()
-    async def remove_premium(self, ctx: Context, user: discord.User):
-        """
-        Remove premium from a user.
-        Usage: removepremium @user
-        """
-        try:
+    async def remove_premium(self, ctx: Context, *, target: str):
+     """
+     Remove premium from a user or guild.
+     Usage: 
+        removepremium @user  (remove user premium)
+        removepremium 123456789  (remove guild premium by ID)
+     """
+     try:
+         # Try to convert to user first
+         user = None
+         try:
+            user = await commands.UserConverter().convert(ctx, target)
+         except commands.UserNotFound:
+            pass
+        
+         if user:
+            # Remove user premium
             user_obj = await User.get_or_none(user_id=user.id)
             
             if not user_obj or not user_obj.is_premium:
@@ -253,17 +317,107 @@ class PremiumCog(Cog, name="Premium"):
             )
             
             embed = discord.Embed(
-                title=f"{emote.xmark} Premium Removed",
+                title=f"{emote.xmark} User Premium Removed",
                 description=f"Premium has been removed from {user.mention}",
                 color=discord.Color.red(),
                 timestamp=datetime.now(IST)
             )
+            embed.set_thumbnail(url=user.display_avatar.url)
             embed.set_footer(text=f"Removed by {ctx.author}")
             
             await ctx.send(embed=embed)
             
-        except Exception as e:
-            await ctx.send(f"{emote.xmark} Error: {str(e)}")
+            # Try to notify user
+            try:
+                dm_embed = discord.Embed(
+                    title=f"{emote.xmark} Premium Removed",
+                    description="Your ScrimX Premium has been removed by the bot owner.",
+                    color=discord.Color.red()
+                )
+                await user.send(embed=dm_embed)
+            except:
+                pass
+            
+            return
+        
+        # If not a user, try as guild ID
+         try:
+            guild_id = int(target)
+         except ValueError:
+            return await ctx.send(f"{emote.xmark} Invalid user mention or guild ID!")
+        
+         guild_obj = await Guild.get_or_none(guild_id=guild_id)
+        
+         if not guild_obj or not guild_obj.is_premium:
+            return await ctx.send(f"{emote.xmark} Guild ID `{guild_id}` doesn't have premium!")
+        
+         await Guild.filter(pk=guild_obj.pk).update(
+            is_premium=False,
+            premium_end_time=None,
+            made_premium_by=None
+        )
+        
+         guild = self.bot.get_guild(guild_id)
+         guild_name = guild.name if guild else f"Guild ID: {guild_id}"
+        
+         embed = discord.Embed(
+            title=f"{emote.xmark} Guild Premium Removed",
+            description=f"Premium has been removed from **{guild_name}**",
+            color=discord.Color.red(),
+            timestamp=datetime.now(IST)
+        )
+        
+         if guild and guild.icon:
+            embed.set_thumbnail(url=guild.icon.url)
+        
+         embed.add_field(name="Guild ID", value=f"`{guild_id}`", inline=False)
+         embed.set_footer(text=f"Removed by {ctx.author}")
+        
+         await ctx.send(embed=embed)
+            
+     except Exception as e:
+         await ctx.send(f"{emote.xmark} Error: {str(e)}")
+
+
+    @commands.command(name="removeguildpremium", aliases=["rgp"])
+    @commands.is_owner()
+    async def remove_guild_premium(self, ctx: Context, guild_id: int):
+     """
+     Remove premium from a guild by ID.
+     Usage: removeguildpremium 123456789
+     """
+     try:
+         guild_obj = await Guild.get_or_none(guild_id=guild_id)
+        
+         if not guild_obj or not guild_obj.is_premium:
+            return await ctx.send(f"{emote.xmark} Guild ID `{guild_id}` doesn't have premium!")
+        
+         await Guild.filter(pk=guild_obj.pk).update(
+            is_premium=False,
+            premium_end_time=None,
+            made_premium_by=None
+        )
+        
+         guild = self.bot.get_guild(guild_id)
+         guild_name = guild.name if guild else f"Guild ID: {guild_id}"
+        
+         embed = discord.Embed(
+            title=f"{emote.xmark} Guild Premium Removed",
+            description=f"Premium has been removed from **{guild_name}**",
+            color=discord.Color.red(),
+            timestamp=datetime.now(IST)
+        )
+        
+         if guild and guild.icon:
+            embed.set_thumbnail(url=guild.icon.url)
+        
+         embed.add_field(name="Guild ID", value=f"`{guild_id}`", inline=False)
+         embed.set_footer(text=f"Removed by {ctx.author}")
+        
+         await ctx.send(embed=embed)
+        
+     except Exception as e:
+        await ctx.send(f"{emote.xmark} Error: {str(e)}")
 
     @commands.command(name="checkpremium", aliases=["cp"])
     @commands.is_owner()
@@ -445,30 +599,30 @@ class PremiumCog(Cog, name="Premium"):
             print(f"❌ Error setting up premium plans: {e}")
 
     @commands.command()
-    @commands.is_owner()
+    @commands.has_permissions(manage_guild=True)
     @checks.is_premium_guild()
     async def custom(self, ctx: Context):
-        """
-        Customize bot's appearance (Avatar, Name, Banner).
-        This is a premium-only feature.
-        """
-        embed = discord.Embed(
-            color=self.bot.color,
-            title=f"{emote.crown} Bot Customization Panel",
-            description=(
-                f"{emote.check} Use the buttons below to customize your bot!\n\n"
-                f"{emote.info} **Available Options:**\n"
-                f"🖼️ **Change Avatar** - Update bot's profile picture\n"
-                f"✏️ **Change Name** - Update bot's username\n"
-                f"🎨 **Change Banner** - Update bot's profile banner\n\n"
-                f"{emote.edit} **Note:** Only bot owner can use this command."
-            )
+     """
+     Customize bot's appearance (Avatar, Bio, Banner) for this server.
+     This is a premium-only feature.
+     """
+     embed = discord.Embed(
+        color=self.bot.color,
+        title=f"{emote.crown} Bot Customization Panel",
+        description=(
+            f"{emote.check} Use the buttons below to customize your bot for this server!\n\n"
+            f"{emote.info} **Available Options:**\n"
+            f"🖼️ **Change Avatar** - Update bot's avatar (Global)\n"
+            f"📝 **Change Bio** - Update bot's bio (Global)\n"
+            f"🎨 **Change Banner** - Update bot's banner (Global)\n\n"
+            f"{emote.edit} **Note:** Only users with Manage Server permission can use this."        
         )
-        embed.set_thumbnail(url=self.bot.user.display_avatar.url)
-        embed.set_footer(text="ScrimX Premium Feature")
-        
-        view = CustomizationView(ctx)
-        await ctx.send(embed=embed, view=view)
+     )
+     embed.set_thumbnail(url=self.bot.user.display_avatar.url)
+     embed.set_footer(text="ScrimX Premium Feature")
+    
+     view = CustomizationView(ctx)
+     await ctx.send(embed=embed, view=view)
 
     @commands.group(invoke_without_command=True)
     @commands.has_permissions(administrator=True)
